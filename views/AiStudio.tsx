@@ -71,7 +71,12 @@ const AiStudio: React.FC = () => {
     setLoading(false);
   };
 
+  // Fix: Restricted Veo video generation to supported aspect ratios (16:9 and 9:16) as per Gemini guidelines
   const handleVideoGen = async () => {
+    if (aspectRatio !== "16:9" && aspectRatio !== "9:16") {
+      alert("Veo video generation only supports 16:9 or 9:16 aspect ratios. Please select a supported ratio.");
+      return;
+    }
     setLoading(true);
     try {
       const url = await generateVideo(prompt, aspectRatio as any);
@@ -101,11 +106,34 @@ const AiStudio: React.FC = () => {
     setLoading(false);
   };
 
+  // Fix: Implemented proper PCM audio decoding for Gemini TTS raw audio bytes as per guidelines
   const handleTTS = async (text: string) => {
     const base64 = await textToSpeech(text);
     if (base64) {
-      const audio = new Audio(`data:audio/pcm;base64,${base64}`); // Simplified for brevity
-      // Audio decoding logic usually needed but this is conceptual
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      
+      const decodeBase64 = (b64: string) => {
+        const binaryString = atob(b64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+      };
+
+      const pcmData = decodeBase64(base64);
+      const dataInt16 = new Int16Array(pcmData.buffer);
+      const audioBuffer = audioContext.createBuffer(1, dataInt16.length, 24000);
+      const channelData = audioBuffer.getChannelData(0);
+      
+      for (let i = 0; i < dataInt16.length; i++) {
+        channelData[i] = dataInt16[i] / 32768.0;
+      }
+      
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      source.start();
     }
   };
 
@@ -162,7 +190,7 @@ const AiStudio: React.FC = () => {
                 {activeMode === 'creative' && (
                   <div className="w-full space-y-4">
                     <div className="flex gap-2 overflow-x-auto pb-1">
-                      {["1:1", "16:9", "9:16", "3:4", "4:3", "21:9"].map(r => (
+                      {["1:1", "16:9", "9:16", "3:4", "4:3"].map(r => (
                         <button 
                           key={r}
                           onClick={() => setAspectRatio(r)}
@@ -195,7 +223,10 @@ const AiStudio: React.FC = () => {
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass p-6 rounded-[32px] space-y-4">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="text-xs font-bold uppercase tracking-widest text-blue-400">Result</h4>
-                  <button onClick={() => setResult(null)} className="text-gray-500 hover:text-white">✕</button>
+                  <div className="flex gap-2">
+                    {result.text && <button onClick={() => handleTTS(result.text)} className="p-1 hover:text-blue-400"><Volume2 size={16} /></button>}
+                    <button onClick={() => setResult(null)} className="text-gray-500 hover:text-white">✕</button>
+                  </div>
                 </div>
                 
                 {result.text && <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{result.text}</p>}

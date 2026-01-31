@@ -4,6 +4,47 @@ import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { Mic, MicOff, Volume2, Radio, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+// Manual implementation of encoding as per guidelines
+function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+// Manual implementation of decoding as per guidelines
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+// Robust PCM decoding logic as shown in examples
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
+
 const LiveAssistant: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState('Standby');
@@ -11,23 +52,6 @@ const LiveAssistant: React.FC = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-
-  const decodeBase64 = (base64: string) => {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  };
-
-  const decodeAudio = async (data: Uint8Array, ctx: AudioContext) => {
-    const dataInt16 = new Int16Array(data.buffer);
-    const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
-    const channelData = buffer.getChannelData(0);
-    for (let i = 0; i < dataInt16.length; i++) {
-      channelData[i] = dataInt16[i] / 32768.0;
-    }
-    return buffer;
-  };
 
   const startSession = async () => {
     setStatus('Connecting...');
@@ -54,11 +78,14 @@ const LiveAssistant: React.FC = () => {
             const int16 = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
             
-            const binary = String.fromCharCode(...new Uint8Array(int16.buffer));
-            const base64 = btoa(binary);
+            // Manual encode function avoids spread operator stack issues
+            const base64 = encode(new Uint8Array(int16.buffer));
             
+            // CRITICAL: Solely rely on sessionPromise resolves to send data
             sessionPromise.then(session => {
-              session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } });
+              session.sendRealtimeInput({ 
+                media: { data: base64, mimeType: 'audio/pcm;rate=16000' } 
+              });
             });
           };
           
@@ -69,12 +96,14 @@ const LiveAssistant: React.FC = () => {
         onmessage: async (message: LiveServerMessage) => {
           const audioBase64 = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
           if (audioBase64 && audioContextRef.current) {
-            const bytes = decodeBase64(audioBase64);
-            const buffer = await decodeAudio(bytes, audioContextRef.current);
+            const bytes = decode(audioBase64);
+            // Use robust decodeAudioData function for raw PCM
+            const buffer = await decodeAudioData(bytes, audioContextRef.current, 24000, 1);
             const source = audioContextRef.current.createBufferSource();
             source.buffer = buffer;
             source.connect(audioContextRef.current.destination);
             
+            // Track next start time for smooth playback
             nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioContextRef.current.currentTime);
             source.start(nextStartTimeRef.current);
             nextStartTimeRef.current += buffer.duration;
@@ -83,7 +112,9 @@ const LiveAssistant: React.FC = () => {
           }
 
           if (message.serverContent?.interrupted) {
-            sourcesRef.current.forEach(s => s.stop());
+            sourcesRef.current.forEach(s => {
+              try { s.stop(); } catch(e) {}
+            });
             sourcesRef.current.clear();
             nextStartTimeRef.current = 0;
           }

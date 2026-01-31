@@ -14,7 +14,8 @@
     "@google/genai": "^1.39.0",
     "lucide-react": "^0.563.0",
     "framer-motion": "^12.29.2",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "canvas-confetti": "^1.9.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

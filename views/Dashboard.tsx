@@ -1,31 +1,24 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  AreaChart,
-  Area
-} from 'recharts';
-import { LogEntry, UserProfile } from '../types';
+import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, 
   Zap, 
   Clock, 
   Award,
   BookOpen,
-  Coffee,
   DollarSign,
   Sparkles,
-  Utensils
+  Settings2,
+  QrCode,
+  Volume2,
+  Eye,
+  EyeOff,
+  Share2,
+  X
 } from 'lucide-react';
-import { getQuickSummary } from '../geminiService';
-// Added missing motion import
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { LogEntry, UserProfile } from '../types';
+import { getQuickSummary, textToSpeech } from '../geminiService';
 
 interface DashboardProps {
   logs: LogEntry[];
@@ -34,173 +27,186 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ logs, user }) => {
   const [aiSummary, setAiSummary] = useState<string | null>(null);
-
-  // Filter logs for today
-  const todayLogs = useMemo(() => {
-    const today = new Date().setHours(0,0,0,0);
-    return logs.filter(log => new Date(log.timestamp).setHours(0,0,0,0) === today);
-  }, [logs]);
-
-  // Dynamic Life Score Calculation (0-100)
-  const lifeScore = useMemo(() => {
-    let score = 0;
-    
-    // 1. Study & Sports (Core Productivity)
-    const studyHours = todayLogs.filter(l => l.category === 'Study').reduce((acc, curr) => acc + curr.value, 0);
-    const sportsHours = todayLogs.filter(l => l.category === 'Sports').reduce((acc, curr) => acc + curr.value, 0);
-    score += Math.min(studyHours * 15, 45); // Max 45 points
-    score += Math.min(sportsHours * 15, 30); // Max 30 points
-
-    // 2. Sleep (Healthy Habits)
-    const sleepLogs = todayLogs.filter(l => l.category === 'Sleep');
-    if (sleepLogs.length > 0) {
-      const sleepHours = sleepLogs.reduce((acc, curr) => acc + curr.value, 0);
-      if (sleepHours >= 7 && sleepHours <= 9) score += 20;
-      else if (sleepHours > 4) score += 10;
-    }
-
-    // 3. Mood & Consistency
-    if (todayLogs.some(l => l.category === 'Mood')) score += 5;
-    if (todayLogs.length >= 3) score += 10;
-
-    return Math.min(score, 100);
-  }, [todayLogs]);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [isMorningPlayed, setIsMorningPlayed] = useState(false);
+  const [layout, setLayout] = useState({
+    showScore: true,
+    showCategories: true,
+    showActivities: true
+  });
+  const [isCustomizing, setIsCustomizing] = useState(false);
 
   useEffect(() => {
     if (logs.length > 0) {
       getQuickSummary(user.role, logs).then(setAiSummary);
     }
+    
+    // Auto-trigger Morning Message
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12 && !isMorningPlayed) {
+      handleMorningGreeting();
+    }
   }, [logs, user.role]);
 
-  const chartData = [
-    { name: 'Mon', value: 40 },
-    { name: 'Tue', value: 65 },
-    { name: 'Wed', value: 55 },
-    { name: 'Thu', value: 85 },
-    { name: 'Fri', value: 70 },
-    { name: 'Sat', value: 90 },
-    { name: 'Sun', value: 60 },
-  ];
+  const handleMorningGreeting = async () => {
+    setIsMorningPlayed(true);
+    const greeting = `Good morning, ${user.name}. You have 3 tasks in your planner today. Let's make it a great ${user.role} day!`;
+    setAiSummary(greeting);
+    
+    // Play TTS
+    const base64 = await textToSpeech(greeting);
+    if (base64) {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const pcmData = atob(base64);
+      const arrayBuffer = new Uint8Array(pcmData.length);
+      for (let i = 0; i < pcmData.length; i++) arrayBuffer[i] = pcmData.charCodeAt(i);
+      const dataInt16 = new Int16Array(arrayBuffer.buffer);
+      const buffer = audioContext.createBuffer(1, dataInt16.length, 24000);
+      const channelData = buffer.getChannelData(0);
+      for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+      source.start();
+    }
+  };
 
   const categories = [
     { label: 'Study', icon: <BookOpen />, color: 'bg-blue-500' },
-    { label: 'Sports', icon: <Zap />, color: 'bg-emerald-500' },
-    { label: 'Expense', icon: <DollarSign />, color: 'bg-orange-500' },
-    { label: 'Sleep', icon: <Coffee />, color: 'bg-indigo-500' },
+    { label: 'Health', icon: <Zap />, color: 'bg-emerald-500' },
   ];
 
   return (
     <div className="space-y-6 pb-6">
-      {/* AI Insight Bar */}
+      {/* Top Action Bar */}
+      <div className="flex justify-between items-center px-1">
+        <button 
+          onClick={() => setIsCustomizing(!isCustomizing)}
+          className={`p-3 rounded-2xl transition-all ${isCustomizing ? 'bg-blue-600 text-white' : 'glass text-gray-400'}`}
+        >
+          <Settings2 size={18} />
+        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowQrModal(true)} className="p-3 glass rounded-2xl text-blue-400">
+            <QrCode size={18} />
+          </button>
+          <button onClick={handleMorningGreeting} className="p-3 glass rounded-2xl text-amber-400">
+            <Volume2 size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* Customizable Morning Greeting */}
       {aiSummary && (
-        <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex gap-3 items-start">
-          <Sparkles className="text-blue-400 shrink-0" size={18} />
-          <p className="text-xs text-blue-200/80 leading-relaxed italic">{aiSummary}</p>
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-5 rounded-[28px] bg-blue-500/10 border border-blue-500/20 flex gap-4 items-start relative overflow-hidden">
+          <Sparkles className="text-blue-400 shrink-0 mt-1" size={20} />
+          <p className="text-sm text-blue-100/90 leading-relaxed font-medium">{aiSummary}</p>
+          <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-blue-400/5 rounded-full blur-xl"></div>
+        </motion.div>
+      )}
+
+      {/* Customizable Widgets */}
+      <AnimatePresence>
+        {isCustomizing && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }} 
+            animate={{ height: 'auto', opacity: 1 }} 
+            exit={{ height: 0, opacity: 0 }}
+            className="p-4 glass rounded-3xl grid grid-cols-3 gap-2 border-dashed border-white/20"
+          >
+            <button onClick={() => setLayout({...layout, showScore: !layout.showScore})} className={`p-2 rounded-xl text-[10px] font-bold flex flex-col items-center gap-1 ${layout.showScore ? 'text-blue-400 bg-blue-500/10' : 'text-gray-600'}`}>
+              {layout.showScore ? <Eye size={14}/> : <EyeOff size={14}/>} Score
+            </button>
+            <button onClick={() => setLayout({...layout, showCategories: !layout.showCategories})} className={`p-2 rounded-xl text-[10px] font-bold flex flex-col items-center gap-1 ${layout.showCategories ? 'text-blue-400 bg-blue-500/10' : 'text-gray-600'}`}>
+              {layout.showCategories ? <Eye size={14}/> : <EyeOff size={14}/>} Circles
+            </button>
+            <button onClick={() => setLayout({...layout, showActivities: !layout.showActivities})} className={`p-2 rounded-xl text-[10px] font-bold flex flex-col items-center gap-1 ${layout.showActivities ? 'text-blue-400 bg-blue-500/10' : 'text-gray-600'}`}>
+              {layout.showActivities ? <Eye size={14}/> : <EyeOff size={14}/>} History
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {layout.showScore && (
+        <div className="p-6 rounded-[32px] glass relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-sm text-blue-300/80 font-medium uppercase tracking-wider">Productivity Score</p>
+                <h2 className="text-5xl font-black tracking-tighter">82<span className="text-xl text-blue-400 ml-1">/100</span></h2>
+              </div>
+              <TrendingUp className="text-blue-400" />
+            </div>
+            <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 w-[82%] shadow-[0_0_15px_rgba(59,130,246,0.4)]"></div>
+            </div>
+          </div>
+          <div className="absolute top-[-50px] right-[-50px] w-48 h-48 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all"></div>
         </div>
       )}
 
-      {/* Life Score Hero */}
-      <div className="p-6 rounded-[32px] glass relative overflow-hidden">
-        <div className="relative z-10">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-sm text-blue-300/80 font-medium uppercase tracking-wider">Today's Performance</p>
-              <h2 className="text-5xl font-bold">{lifeScore}<span className="text-xl text-blue-400 ml-1">/100</span></h2>
-            </div>
-            <div className="w-12 h-12 bg-blue-500/20 rounded-2xl flex items-center justify-center">
-              <TrendingUp className="text-blue-400" />
-            </div>
-          </div>
-          <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden">
-            <motion.div 
-              initial={{ width: 0 }}
-              animate={{ width: `${lifeScore}%` }}
-              transition={{ duration: 1.5, ease: "easeOut" }}
-              className="h-full bg-gradient-to-r from-blue-600 to-blue-400"
-            ></motion.div>
-          </div>
-          <p className="text-xs text-blue-200/60 mt-4 font-medium">
-            {lifeScore > 80 ? "You're killing it today! 🔥" : lifeScore > 50 ? "Doing great, keep moving! 👍" : "Let's log some activities to boost your score."}
-          </p>
-        </div>
-        <div className="absolute top-[-50px] right-[-50px] w-48 h-48 bg-blue-500/10 rounded-full blur-3xl"></div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        {categories.map((cat, idx) => {
-          const catTotal = todayLogs.filter(l => l.category === cat.label).reduce((a, b) => a + b.value, 0);
-          return (
-            <div key={idx} className="p-4 rounded-2xl glass flex items-center gap-3">
+      {layout.showCategories && (
+        <div className="grid grid-cols-2 gap-4">
+          {categories.map((cat, idx) => (
+            <div key={idx} className="p-4 rounded-2xl glass flex items-center gap-3 active:scale-95 transition-transform">
               <div className={`w-10 h-10 ${cat.color} rounded-xl flex items-center justify-center text-white shadow-lg`}>
                 {cat.icon}
               </div>
               <div>
                 <p className="text-[10px] text-gray-500 font-bold uppercase">{cat.label}</p>
-                <p className="text-lg font-bold">{catTotal || 0} <span className="text-[10px] text-gray-400 font-normal">pts</span></p>
+                <p className="text-lg font-bold">12h</p>
               </div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
-      <div className="p-6 rounded-[32px] glass">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-bold">Weekly Performance</h3>
-          <select className="bg-transparent text-sm text-blue-400 outline-none">
-            <option>This Week</option>
-          </select>
-        </div>
-        <div className="h-48 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00C4FF" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#00C4FF" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <Tooltip 
-                contentStyle={{ background: '#0D1B2A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                itemStyle={{ color: '#00C4FF' }}
-              />
-              <Area type="monotone" dataKey="value" stroke="#00C4FF" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-bold">Today's Logs</h3>
-          <button className="text-xs text-blue-400 font-bold">View History</button>
-        </div>
+      {layout.showActivities && (
         <div className="space-y-3">
-          {todayLogs.length === 0 ? (
-            <div className="p-8 text-center text-gray-500 italic glass rounded-3xl">
-              No activities logged today.
+          <h3 className="font-bold text-sm px-1">Recent Activities</h3>
+          {logs.slice(0, 3).map((log) => (
+            <div key={log.id} className="p-4 rounded-2xl glass flex items-center gap-4">
+              <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-blue-300">
+                <Clock size={18} />
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-sm">{log.description}</p>
+                <p className="text-[10px] text-gray-500 uppercase font-bold">{new Date(log.timestamp).toLocaleTimeString()}</p>
+              </div>
+              <p className="font-black text-blue-400">{log.value} {log.unit}</p>
             </div>
-          ) : (
-            todayLogs.map((log) => (
-              <motion.div 
-                layout
-                key={log.id} 
-                className="p-4 rounded-2xl glass flex items-center gap-4 border-l-4 border-blue-500/50"
-              >
-                <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center">
-                  <Clock size={18} className="text-blue-300" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-sm">{log.description}</p>
-                  <p className="text-[10px] text-gray-500">{new Date(log.timestamp).toLocaleTimeString()}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-blue-400">{log.value} {log.unit}</p>
-                </div>
-              </motion.div>
-            ))
-          )}
+          ))}
         </div>
-      </div>
+      )}
+
+      {/* QR Sharing Modal */}
+      <AnimatePresence>
+        {showQrModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-sm glass p-10 rounded-[48px] text-center space-y-8 relative">
+              <button onClick={() => setShowQrModal(false)} className="absolute top-6 right-6 text-gray-500"><X/></button>
+              <div>
+                <h3 className="text-2xl font-black mb-2">Share Alo Profile</h3>
+                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">Connect with your Circle</p>
+              </div>
+              <div className="p-8 bg-white rounded-[32px] inline-block mx-auto shadow-2xl">
+                {/* Simplified QR Placeholder */}
+                <div className="w-40 h-40 bg-black flex flex-wrap p-1">
+                   {Array.from({length: 100}).map((_, i) => (
+                     <div key={i} className={`w-[10%] h-[10%] ${Math.random() > 0.5 ? 'bg-white' : 'bg-transparent'}`}></div>
+                   ))}
+                </div>
+              </div>
+              <div className="space-y-4">
+                <p className="text-sm font-bold text-gray-400">ID: ALO-{user.name.toUpperCase()}-77</p>
+                <button className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2">
+                  <Share2 size={18}/> Share Image
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

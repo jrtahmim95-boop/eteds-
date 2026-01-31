@@ -3,48 +3,71 @@ import { GoogleGenAI, Type, Modality } from "@google/genai";
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+/**
+ * Parses natural language into a structured log entry.
+ */
 export const parseVoiceCommand = async (text: string) => {
   const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `You are an expert natural language parser for a life tracking app called Alo. 
-    Supported Categories: Sleep, Study, Sports, Expense, Income, Prayer, Mood.
-    User might speak in English, Bengali (using script or Romanized), or Hindi.
+    contents: `You are an expert life-tracking assistant. Parse the following natural language tracking command into structured data.
     
-    Task: Extract data from the user input into a JSON object.
-    Input: "${text}"`,
+    Rules:
+    1. Category MUST be one of: Sleep, Study, Sports, Expense, Income, Prayer, Mood, General.
+    2. If the user is vague (e.g., "I ran"), suggest 'Sports' and a default value of 1 hour or unit.
+    3. Input: "${text}"`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          category: {
-            type: Type.STRING,
-            description: "The category of the log: Sleep, Study, Sports, Expense, Income, Prayer, Mood.",
-          },
-          value: {
-            type: Type.NUMBER,
-            description: "The numeric value extracted (e.g., '২ ঘণ্টা' becomes 2, 'Spent 300' becomes 300).",
-          },
-          unit: {
-            type: Type.STRING,
-            description: "The unit (e.g., hours, taka, minutes, units).",
-          },
-          description: {
-            type: Type.STRING,
-            description: "A summary of the action in English.",
-          },
+          category: { type: Type.STRING },
+          value: { type: Type.NUMBER },
+          unit: { type: Type.STRING },
+          description: { type: Type.STRING },
         },
         required: ["category", "value", "unit", "description"],
       },
     },
   });
 
-  const jsonStr = response.text?.trim() || "{}";
   try {
-    return JSON.parse(jsonStr);
+    return JSON.parse(response.text?.trim() || "{}");
   } catch (e) {
-    console.error("Failed to parse AI response", e);
+    return null;
+  }
+};
+
+/**
+ * Specialized parser for Vault commands.
+ * Extracts labels and passwords from voice.
+ */
+export const parseVaultCommand = async (text: string) => {
+  const ai = getAI();
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `You are a secure vault assistant. Extract the service/label and the password/value from the following request.
+    
+    Example: "Save my Netflix password as secure123" -> { "label": "Netflix", "value": "secure123", "category": "Personal" }
+    
+    Input: "${text}"`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          label: { type: Type.STRING, description: "Name of the service or item." },
+          value: { type: Type.STRING, description: "The actual password or sensitive value." },
+          category: { type: Type.STRING, description: "Personal, Finance, Work, or Social." },
+        },
+        required: ["label", "value", "category"],
+      },
+    },
+  });
+
+  try {
+    return JSON.parse(response.text?.trim() || "{}");
+  } catch (e) {
     return null;
   }
 };
@@ -54,9 +77,7 @@ export const searchGrounding = async (query: string) => {
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: query,
-    config: {
-      tools: [{ googleSearch: {} }],
-    },
+    config: { tools: [{ googleSearch: {} }] },
   });
   return {
     text: response.text,
@@ -73,10 +94,7 @@ export const mapsGrounding = async (query: string, location?: { latitude: number
       tools: [{ googleMaps: {} }],
       toolConfig: {
         retrievalConfig: location ? {
-          latLng: {
-            latitude: location.latitude,
-            longitude: location.longitude
-          }
+          latLng: { latitude: location.latitude, longitude: location.longitude }
         } : undefined
       }
     },
@@ -92,9 +110,7 @@ export const deepThink = async (prompt: string) => {
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
     contents: prompt,
-    config: {
-      thinkingConfig: { thinkingBudget: 32768 }
-    },
+    config: { thinkingConfig: { thinkingBudget: 32768 } },
   });
   return response.text;
 };
@@ -177,7 +193,7 @@ export const textToSpeech = async (text: string) => {
 export const getQuickSummary = async (role: string, logs: any[]) => {
   const ai = getAI();
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-lite",
+    model: 'gemini-3-flash-preview',
     contents: `As an AI assistant for a ${role}, summarize these recent logs and give a 1-sentence productivity tip: ${JSON.stringify(logs.slice(0,5))}`,
   });
   return response.text;
