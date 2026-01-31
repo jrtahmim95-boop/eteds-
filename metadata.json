@@ -1,0 +1,9 @@
+{
+  "name": "Alo - Voice-Controlled Life Tracker",
+  "description": "A lightweight, voice-first personal life tracker with glassmorphism design, secure vault, and intelligent natural language parsing.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation",
+    "camera"
+  ]
+}
